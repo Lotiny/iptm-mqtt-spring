@@ -12,6 +12,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Random;
+
 /**
  * @author Lotiny
  * @since 2/9/2025
@@ -21,16 +25,19 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 public class MqttApplication {
 
     public static Dotenv dotenv;
+    public static String collectionPrefix;
 
     public static void main(String[] args) {
         dotenv = Dotenv.load();
+        collectionPrefix = dotenv.get("MONGODB_COLLECTION_PREFIX");
         SpringApplication.run(MqttApplication.class, args);
     }
 
     @Bean
     public MongoTemplate mongoTemplate() {
         String mongoUri = dotenv.get("MONGODB_HOST");
-        return new MongoTemplate(MongoClients.create(mongoUri), "sensorDB");
+        String database = dotenv.get("MONGODB_DATABASE");
+        return new MongoTemplate(MongoClients.create(mongoUri), database);
     }
 
     @Bean
@@ -50,11 +57,12 @@ public class MqttApplication {
 
             client.connect(options);
             client.subscribe(topic, (t, message) -> {
+                String collectionName = collectionPrefix + "sensor_" + new SimpleDateFormat("dd_MM_yy").format(new Date());
                 String payload = new String(message.getPayload());
                 System.out.println("Received MQTT Message: " + payload);
                 Document doc = Document.parse(payload);
                 doc.append("timestamp", System.currentTimeMillis());
-                mongoTemplate.getCollection("sensorData").insertOne(doc);
+                mongoTemplate.getCollection(collectionName).insertOne(doc);
             });
         };
     }

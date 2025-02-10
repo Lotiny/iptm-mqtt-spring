@@ -1,12 +1,12 @@
 package me.lotiny.mqtt.data;
 
+import com.mongodb.client.MongoCollection;
+import me.lotiny.mqtt.MqttApplication;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -24,13 +24,16 @@ class SensorDataController {
         this.mongoTemplate = mongoTemplate;
     }
 
-    @GetMapping
-    public List<Document> getSensorData() {
-        return mongoTemplate.getCollection("sensorData")
-                .find()
+    @GetMapping("/{date}")
+    public List<Document> getSensorDataDate(@PathVariable String date) {
+        String collectionName = MqttApplication.collectionPrefix + "sensor_" + date;
+        if (!mongoTemplate.collectionExists(collectionName)) {
+            return new ArrayList<>();
+        }
+
+        MongoCollection<Document> collection = mongoTemplate.getCollection(collectionName);
+        return collection.find()
                 .sort(new Document("timestamp", -1))
-                .limit(50)
-                .into(new java.util.ArrayList<>());
+                .into(new ArrayList<>());
     }
 }
-

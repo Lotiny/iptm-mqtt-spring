@@ -14,7 +14,6 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Random;
 
 /**
  * @author Lotiny
@@ -43,27 +42,30 @@ public class MqttApplication {
     @Bean
     public CommandLineRunner mqttListener(MongoTemplate mongoTemplate) {
         return args -> {
-            String broker = "wss://" + dotenv.get("HIVEMQ_BROKER");
-            String topic = "sensor/data";
-            String clientId = "SpringBootClient";
-            String username = dotenv.get("HIVEMQ_USER");
-            String password = dotenv.get("HIVEMQ_PASSWORD");
+            String broker = dotenv.get("MQTT_BROKER");
+            String topic = dotenv.get("MQTT_TOPIC");
+            String clientId = dotenv.get("MQTT_CLIENT_ID");
+            String username = dotenv.get("MQTT_USER");
+            String password = dotenv.get("MQTT_PASSWORD");
 
-            MqttClient client = new MqttClient(broker, clientId, null);
-            MqttConnectOptions options = new MqttConnectOptions();
-            options.setUserName(username);
-            options.setPassword(password.toCharArray());
-            options.setCleanSession(true);
+            try (MqttClient client = new MqttClient(broker, clientId, null)) {
+                MqttConnectOptions options = new MqttConnectOptions();
+                options.setUserName(username);
+                options.setPassword(password.toCharArray());
+                options.setCleanSession(true);
 
-            client.connect(options);
-            client.subscribe(topic, (t, message) -> {
-                String collectionName = collectionPrefix + "sensor_" + new SimpleDateFormat("dd_MM_yy").format(new Date());
-                String payload = new String(message.getPayload());
-                System.out.println("Received MQTT Message: " + payload);
-                Document doc = Document.parse(payload);
-                doc.append("timestamp", System.currentTimeMillis());
-                mongoTemplate.getCollection(collectionName).insertOne(doc);
-            });
+                client.connect(options);
+                client.subscribe(topic, (t, message) -> {
+                    String collectionName = collectionPrefix + "sensor_" + new SimpleDateFormat("dd_MM_yy").format(new Date());
+                    String payload = new String(message.getPayload());
+                    System.out.println("Received MQTT Message: \n" + payload);
+                    Document document = Document.parse(payload);
+                    document.append("timestamp", System.currentTimeMillis());
+                    mongoTemplate.getCollection(collectionName).insertOne(document);
+                });
+            } catch (Exception e) {
+                e.fillInStackTrace();
+            }
         };
     }
 }

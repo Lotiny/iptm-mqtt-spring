@@ -2,9 +2,10 @@ package me.lotiny.mqtt;
 
 import com.mongodb.client.MongoClients;
 import io.github.cdimascio.dotenv.Dotenv;
+import jakarta.annotation.PreDestroy;
 import org.bson.Document;
-import org.eclipse.paho.client.mqttv3.MqttClient;
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.*;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -25,6 +26,7 @@ public class MqttApplication {
 
     public static Dotenv dotenv; // Static variable to hold the Dotenv instance for environment variables
     public static String collectionPrefix; // Static variable to hold the MongoDB collection prefix
+    private MqttClient mqttClient; // Instance of MqttClient.
 
     public static void main(String[] args) {
         // Load environment variables from .env file
@@ -72,35 +74,70 @@ public class MqttApplication {
             // Retrieve MQTT password from environment variables
             String password = dotenv.get("MQTT_PASSWORD");
 
-            // Try to connect to the MQTT broker and subscribe to the topic
-            try (MqttClient client = new MqttClient(broker, clientId, null)) {
-                // Configure MQTT connection options
-                MqttConnectOptions options = new MqttConnectOptions();
-                options.setUserName(username);
-                options.setPassword(password.toCharArray());
-                options.setCleanSession(true); // Clean session: start with a fresh session
+            // Create a MqttClient instance with MemoryPersistence
+            mqttClient = new MqttClient(broker, clientId, new MemoryPersistence());
 
-                // Connect to the MQTT broker
-                client.connect(options);
-                // Subscribe to the specified MQTT topic
-                client.subscribe(topic, (t, message) -> {
-                    // Define the collection name based on the current date
-                    String collectionName = collectionPrefix + "sensor_" + new SimpleDateFormat("dd_MM_yy").format(new Date());
-                    // Get the message payload as a string
-                    String payload = new String(message.getPayload());
-                    // Print the received message to the console
-                    System.out.println("Received MQTT Message: \n" + payload);
-                    // Parse the payload into a MongoDB Document
-                    Document document = Document.parse(payload);
-                    // Add a timestamp to the document
-                    document.append("timestamp", System.currentTimeMillis());
-                    // Insert the document into the specified collection
-                    mongoTemplate.getCollection(collectionName).insertOne(document);
-                });
-            } catch (Exception e) {
-                // Handle any exceptions that occur during MQTT operations
-                e.fillInStackTrace();
-            }
+            // Configure MQTT connection options
+            MqttConnectOptions options = new MqttConnectOptions();
+            options.setUserName(username);
+            options.setPassword(password.toCharArray());
+            options.setCleanSession(true); // Clean session: start with a fresh session
+
+            // Set a callback for handling lost connections
+            mqttClient.setCallback(new MqttCallback() {
+                @Override
+                public void connectionLost(Throwable cause) {
+                    System.out.println("Connection to MQTT broker lost!");
+                    // Implement reconnection logic here if needed
+                }
+
+                @Override
+                public void messageArrived(String topic, MqttMessage message) {
+                    // This method should be empty, as we handle messages in subscribe()
+                }
+
+                @Override
+                public void deliveryComplete(IMqttDeliveryToken token) {
+                    // Message delivery completion handling
+                }
+            });
+
+            // Connect to the MQTT broker
+            mqttClient.connect(options);
+            // Subscribe to the specified MQTT topic
+            mqttClient.subscribe(topic, (t, message) -> {
+                // Define the collection name based on the current date
+                String collectionName = collectionPrefix + "sensor_" + new SimpleDateFormat("dd_MM_yy").format(new Date());
+                // Get the message payload as a string
+                String payload = new String(message.getPayload());
+                // Print the received message to the console
+                System.out.println("Received MQTT Message: \n" + payload);
+                // Parse the payload into a MongoDB Document and modify values
+                Document originalDocument = Document.parse(payload);
+                Document document = new Document();
+                for (String key : originalDocument.keySet()) {
+                    document.append(key, (double) originalDocument.getInteger(key) / 10);
+                }
+
+                // Add a timestamp to the document
+                document.append("timestamp", System.currentTimeMillis());
+                // Insert the document into the specified collection
+                mongoTemplate.getCollection(collectionName).insertOne(document);
+
+            });
         };
+    }
+
+    /**
+     * Closes the MQTT client connection when the application is about to shut down.
+     *
+     * @throws MqttException If an error occurs while closing the connection.
+     */
+    @PreDestroy
+    public void closeMqttClient() throws MqttException {
+        if (mqttClient != null && mqttClient.isConnected()) {
+            mqttClient.disconnect();
+            mqttClient.close();
+        }
     }
 }
